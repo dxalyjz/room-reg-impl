@@ -15,8 +15,22 @@ PID_FILE_NAME = "PID.txt"
 
 MaxRoom = 20
 
+REFRESH_INTERVAL = 3600
+
+MASTERSERVER_URL = "127.0.0.1"
+
 server_info: dict = {}
 server_info_lock = threading.Lock()
+
+_ui_schedule_refresh = None
+
+def set_schedule_refresh(callback):
+    global _ui_schedule_refresh
+    _ui_schedule_refresh = callback
+
+def trigger_ui_refresh():
+    if _ui_schedule_refresh is not None:
+        _ui_schedule_refresh()
 
 
 def _find_available_port(port_range: tuple, used_ports: set) -> int:
@@ -35,10 +49,12 @@ def _init():
     with open(PID_FILE_NAME, "w") as f:
         f.write(str(os.getpid()))
 
+    now = time.time()
     for i in range(1, MaxRoom + 1):
         name = str(i)
         server_info[name] = {
             "server_port": 0,
+            "last_active_time": now,
         }
 
 
@@ -72,6 +88,7 @@ def stop_instance(server_name: str):
             pass
         info.pop("process", None)
         info["server_port"] = 0
+    trigger_ui_refresh()
 
 
 def start_instance(server_name: str) -> bool:
@@ -100,7 +117,9 @@ def start_instance(server_name: str) -> bool:
             server_info[server_name] = {
                 "server_port": port,
                 "process": proc,
+                "last_active_time": time.time(),
             }
+        trigger_ui_refresh()
         return True
     return False
 
@@ -113,7 +132,7 @@ def run_citra_server_instance(server_name: str, room_port: str):
         "--preferred-game-id", "000400000011D700",
         "--port", str(room_port),
         "--max_members", str(MAX_VALUE_ROOM_MEMBERS),
-        "--web-api-url", "127.0.0.1",
+        "--web-api-url", MASTERSERVER_URL,
         "--token", "tsaf12",
     ]
     return subprocess.Popen(["citra-room"] + cmd, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -121,35 +140,65 @@ def run_citra_server_instance(server_name: str, room_port: str):
 
 def fetch_lobby_rooms() -> dict:
     try:
-        with urllib.request.urlopen("http://127.0.0.1/lobby", timeout=5) as resp:
+        with urllib.request.urlopen(f"http://{MASTERSERVER_URL}/lobby", timeout=5) as resp:
             data = json.loads(resp.read())
+            
             return {room["name"]: room for room in data.get("rooms", [])}
     except Exception as e:
         print(f"[清理] 获取房间列表失败: {e}")
         return {}
 
 
-def cleanup_empty_rooms_loop(interval=3):
+def cleanup_empty_rooms_loop():
+    CHECK_INTERVAL = 5
     while True:
-        time.sleep(interval)
+        time.sleep(CHECK_INTERVAL)
         try:
             rooms = fetch_lobby_rooms()
             if not rooms:
                 continue
+
+            restarted_count = 0
+            now = time.time()
+
             for name, room in rooms.items():
-                if len(room.get("players", [])) > 0:
-                    continue
+                player_count = len(room.get("players", []))
+                port = room.get("port", "?")
+
                 with server_info_lock:
                     if name not in server_info:
                         continue
                     info = server_info[name]
                     if "process" not in info or info["process"].poll() is not None:
                         continue
-                print(f"[清理] 房间 '{name}' 无人, 重启并更换端口...")
+
+                if player_count > 0:
+                    with server_info_lock:
+                        if name in server_info:
+                            server_info[name]["last_active_time"] = now
+                    continue
+
+                with server_info_lock:
+                    if name not in server_info:
+                        continue
+                    last_active = server_info[name].get("last_active_time", now)
+
+                idle_duration = now - last_active
+                if idle_duration < REFRESH_INTERVAL:
+                    continue
+
+                print(f"[清理]  房间 '{name}' (端口 {port}) 已空闲 {idle_duration:.0f} 秒, 重启并更换端口...")
                 stop_instance(name)
                 time.sleep(0.5)
-                start_instance(name)
-                print(f"[清理] 房间 '{name}' 已重启")
+                if start_instance(name):
+                    restarted_count += 1
+                    print(f"[清理]  房间 '{name}' 已重启")
+                else:
+                    print(f"[清理]  房间 '{name}' 重启失败")
+
+            if restarted_count > 0:
+                print(f"[清理] 本轮完成, 共重启 {restarted_count} 个房间")
+                trigger_ui_refresh()
         except Exception as e:
             print(f"[清理] 出错: {e}")
 
@@ -209,6 +258,8 @@ class CitraManagerUI:
         self.stop_all_btn.pack(side=tk.LEFT, padx=5)
 
         self.refresh_display()
+
+        set_schedule_refresh(lambda: self.root.after(0, self.refresh_display))
 
     def refresh_display(self):
         for item in self.tree.get_children():
@@ -270,9 +321,14 @@ class CitraManagerUI:
         stop_instance(name)
         self.root.after(0, self.refresh_display)
 
+    def _auto_refresh(self):
+        self.refresh_display()
+        self.root.after(5000, self._auto_refresh)
+
     def run(self):
         self.refresh_display()
-        threading.Thread(target=cleanup_empty_rooms_loop, args=(30,), daemon=True).start()
+        self._auto_refresh()
+        threading.Thread(target=cleanup_empty_rooms_loop, daemon=True).start()
         self.root.mainloop()
 
 

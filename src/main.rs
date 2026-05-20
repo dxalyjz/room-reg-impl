@@ -149,6 +149,21 @@ fn register_lobby(
         Status::TooManyRequests
     })?;
 
+    // Remove existing room with the same name before registering
+    let existing_uuids: Vec<Uuid> = info
+        .rooms
+        .iter()
+        .filter(|(_, r)| r.value.name == room.name)
+        .map(|(uuid, _)| *uuid)
+        .collect();
+
+    for uuid in existing_uuids {
+        if let Some(removed) = info.rooms.remove(&uuid) {
+            info.usage.decrease(&removed.real_ip);
+            println!("{} \"{}\"", "Overwriting".yellow(), &room.name);
+        }
+    }
+
     println!("{} \"{}\"", "Registering".green(), &room.name);
 
     let uuid = Uuid::new_v4();

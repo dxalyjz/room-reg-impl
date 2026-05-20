@@ -16,3 +16,8 @@ target/
 # OS files
 Thumbs.db
 .DS_Store
+
+build/
+__pycache__/
+PID.txt
+ban_list.json
