@@ -1,7 +1,9 @@
 Config(
-    port: 3000,
-    timeout_seconds: 30,
+    port: 80,
+    timeout_seconds: 2,
+    lobby_timeout_seconds: Some(15),
     user_limits: {
         // "1.2.3.4": 5,
     },
+    default_limit: Some(50),
 )

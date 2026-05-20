@@ -12,11 +12,11 @@ pub struct UsageTracker {
 }
 
 impl UsageTracker {
-    pub fn new(user_limits: HashMap<IpAddr, u16>) -> Self {
+    pub fn new(user_limits: HashMap<IpAddr, u16>, default_limit: u16) -> Self {
         Self {
             usage_count_by_ip: HashMap::new(),
             user_limits,
-            limit: 5,
+            limit: default_limit,
         }
     }
 

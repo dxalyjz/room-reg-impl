@@ -1,0 +1,18 @@
+# Rust build output
+target/
+
+# Pre-built binaries
+*.exe
+
+# Environment-specific launch scripts
+*.bat
+
+# IDE/editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+Thumbs.db
+.DS_Store

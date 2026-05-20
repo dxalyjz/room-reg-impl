@@ -65,10 +65,10 @@ pub struct Member {
 }
 
 impl Rooms {
-    pub fn new(user_limits: HashMap<IpAddr, u16>) -> Self {
+    pub fn new(user_limits: HashMap<IpAddr, u16>, default_limit: u16) -> Self {
         Self {
             rooms: HashMap::new(),
-            usage: UsageTracker::new(user_limits),
+            usage: UsageTracker::new(user_limits, default_limit),
         }
     }
 

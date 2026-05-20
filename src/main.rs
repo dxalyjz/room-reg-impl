@@ -16,7 +16,9 @@ use uuid::Uuid;
 pub struct Config {
     port: u16,
     timeout_seconds: u64,
+    lobby_timeout_seconds: Option<u64>,
     user_limits: HashMap<IpAddr, u16>,
+    default_limit: Option<u16>,
 }
 
 mod cli;
@@ -39,16 +41,18 @@ fn rocket() -> _ {
     };
     let timeout_seconds = config.timeout_seconds;
 
-    let roomref = Arc::new(RwLock::new(Rooms::new(config.user_limits)));
+    let default_limit = config.default_limit.unwrap_or(50);
+    let roomref = Arc::new(RwLock::new(Rooms::new(config.user_limits, default_limit)));
 
     // Periodically remove rooms that haven't refreshed themselves
     let rr = roomref.clone();
+    let lobby_timeout = Duration::from_secs(config.lobby_timeout_seconds.unwrap_or(timeout_seconds));
     std::thread::spawn(move || loop {
-        let timeout = Duration::from_secs(timeout_seconds);
-        std::thread::sleep(timeout);
+        let sleep_duration = Duration::from_secs(timeout_seconds);
+        std::thread::sleep(sleep_duration);
 
         if let Ok(mut rooms) = rr.write() {
-            rooms.remove_timed_out_lobbies(timeout);
+            rooms.remove_timed_out_lobbies(lobby_timeout);
         }
     });
 
@@ -226,7 +230,8 @@ fn ok_for_pkey_retrieval() -> (ContentType, &'static str) {
 // The previous implementation used the wrong `ContentType` by mistake.
 //
 // The clients now unfortunately rely on this bug, so: we need to replicate the mistakes.
-#[post("/jwt/internal", data = "<_body>")]
-fn ok_for_token_retrieval(_body: String) -> (ContentType, &'static str) {
+// Citra sends: POST /jwt/internal with empty body and x-username/x-token in headers
+#[post("/jwt/internal")]
+fn ok_for_token_retrieval() -> (ContentType, &'static str) {
     (ContentType::HTML, fake::JWT_TOKEN)
 }
