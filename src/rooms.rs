@@ -16,7 +16,7 @@ pub struct Room {
     pub address: Option<IpAddr>,
     pub name: String,
     #[serde(default = "String::new")]
-    description: String,
+    pub description: String,
     #[serde(default = "String::new")]
     owner: String,
     port: u16,

@@ -15,7 +15,7 @@ PID_FILE_NAME = "PID.txt"
 
 MaxRoom = 20
 
-REFRESH_INTERVAL = 3600
+REFRESH_INTERVAL = 10
 
 MASTERSERVER_URL = "127.0.0.1"
 
@@ -133,7 +133,8 @@ def run_citra_server_instance(server_name: str, room_port: str):
         "--port", str(room_port),
         "--max_members", str(MAX_VALUE_ROOM_MEMBERS),
         "--web-api-url", MASTERSERVER_URL,
-        "--token", "tsaf12",
+        "--token", "73067644-097e-405c-b70b-24f5739aabf8",
+        "--username=test1"
     ]
     return subprocess.Popen(["citra-room"] + cmd, creationflags=subprocess.CREATE_NO_WINDOW)
 
@@ -262,20 +263,30 @@ class CitraManagerUI:
         set_schedule_refresh(lambda: self.root.after(0, self.refresh_display))
 
     def refresh_display(self):
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-
         running = 0
-        for name in sorted(server_info.keys(), key=int):
+        current_items = set(self.tree.get_children())
+        expected_names = sorted(server_info.keys(), key=int)
+
+        for name in expected_names:
             alive = is_room_alive(name)
             with server_info_lock:
                 info = server_info.get(name, {})
                 port = info.get("server_port", 0)
 
             status = "运行中" if alive else "已停止"
-            self.tree.insert("", tk.END, iid=name, values=(name, port, status))
+            values = (name, port, status)
+
+            if name in current_items:
+                self.tree.item(name, values=values)
+                current_items.remove(name)
+            else:
+                self.tree.insert("", tk.END, iid=name, values=values)
+
             if alive:
                 running += 1
+
+        for old_item in current_items:
+            self.tree.delete(old_item)
 
         total = len(server_info)
         self.status_label.config(text=f"运行中: {running}/{total}")
@@ -329,6 +340,7 @@ class CitraManagerUI:
         self.refresh_display()
         self._auto_refresh()
         threading.Thread(target=cleanup_empty_rooms_loop, daemon=True).start()
+        self.start_all()
         self.root.mainloop()
 
 

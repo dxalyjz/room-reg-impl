@@ -1,0 +1,21 @@
+{
+  "suyu": {
+    "username": "suyu",
+    "password_hash": "password",
+    "yuzu_token": "sutoken",
+    "avatar_url": "",
+    "roles": [],
+    "is_banned": false,
+    "ban_reason": null
+  },
+  "test1": {
+    "username": "test1",
+    "password_hash": "$2b$12$Rtb7fQSvsinf0BMcs4H62uLxguB7TfNrvEdS0lezDRq1ecfs5VAYW",
+    "yuzu_token": "73067644-097e-405c-b70b-24f5739aabf8",
+    "avatar_url": "",
+    "roles": [],
+    "is_banned": false,
+    "ban_reason": null
+  }
+
+}

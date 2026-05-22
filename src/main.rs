@@ -2,7 +2,7 @@ use owo_colors::OwoColorize;
 use rocket::http::{ContentType, Status};
 use rocket::request::{FromRequest, Outcome};
 use rocket::serde::json::{json, Json, Value};
-use rocket::{delete, get, launch, post, routes, Request, State};
+use rocket::{catch, catchers, delete, get, launch, post, routes, Request, State};
 use rocket_client_addr::ClientAddr;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -11,15 +11,6 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use std::time::SystemTime;
 use uuid::Uuid;
-
-#[derive(Deserialize)]
-pub struct Config {
-    port: u16,
-    timeout_seconds: u64,
-    lobby_timeout_seconds: Option<u64>,
-    user_limits: HashMap<IpAddr, u16>,
-    default_limit: Option<u16>,
-}
 
 mod cli;
 mod limit;
@@ -31,7 +22,37 @@ mod filter;
 mod rooms;
 use rooms::{Member, Room, Rooms};
 
+mod models;
+mod auth;
+mod web;
+use web::{WebState, RoomsStorage};
+
 type Storage = Arc<RwLock<Rooms>>;
+
+#[derive(Deserialize)]
+pub struct Config {
+    port: u16,
+    timeout_seconds: u64,
+    lobby_timeout_seconds: Option<u64>,
+    user_limits: HashMap<IpAddr, u16>,
+    default_limit: Option<u16>,
+    #[serde(default = "default_max_username_length")]
+    max_username_length: usize,
+    #[serde(default = "default_max_roomname_length")]
+    max_roomname_length: usize,
+    #[serde(default = "default_max_password_length")]
+    max_password_length: usize,
+    #[serde(default = "default_max_description_length")]
+    max_description_length: usize,
+    #[serde(default = "default_max_game_name_length")]
+    max_game_name_length: usize,
+}
+
+fn default_max_username_length() -> usize { 12 }
+fn default_max_roomname_length() -> usize { 20 }
+fn default_max_password_length() -> usize { 32 }
+fn default_max_description_length() -> usize { 100 }
+fn default_max_game_name_length() -> usize { 40 }
 
 #[launch]
 fn rocket() -> _ {
@@ -42,7 +63,15 @@ fn rocket() -> _ {
     let timeout_seconds = config.timeout_seconds;
 
     let default_limit = config.default_limit.unwrap_or(50);
-    let roomref = Arc::new(RwLock::new(Rooms::new(config.user_limits, default_limit)));
+    let roomref: RoomsStorage = Arc::new(RwLock::new(Rooms::new(config.user_limits, default_limit)));
+
+    let web_state = WebState::new(
+        config.max_username_length,
+        config.max_roomname_length,
+        config.max_password_length,
+        config.max_description_length,
+        config.max_game_name_length,
+    );
 
     // Periodically remove rooms that haven't refreshed themselves
     let rr = roomref.clone();
@@ -63,22 +92,52 @@ fn rocket() -> _ {
     rocket::build()
         .configure(rocket::Config::figment().merge(("port", config.port)))
         .manage(roomref)
+        .manage(web_state)
         .mount(
             "/",
             routes![
+                // Lobby routes
                 get_lobbies,
                 register_lobby,
                 update_lobby,
                 delete_lobby,
+                // Profile routes
                 get_profile,
                 post_profile,
+                // Telemetry
                 silence_telemetry,
-                silence_jwt_post,
                 silence_jst_empty_post,
-                ok_for_token_retrieval,
-                ok_for_pkey_retrieval
+                // JWT routes (real implementation)
+                web::jwt_internal,
+                web::jwt_external,
+                web::get_public_key,
+                // User routes
+                web::get_current_user,
+                web::register_user,
+                web::login_web,
+                web::logout_user,
+                web::regenerate_token,
+                // Info routes
+                web::get_limits,
+                // Admin routes
+                web::get_users,
+                web::ban_user,
+                web::admin_regenerate_token,
+                web::get_ban_words,
+                web::add_ban_word,
+                web::remove_ban_word,
+                web::get_sessions,
+                web::revoke_session,
+                web::delete_room_admin,
+                web::update_room_admin,
             ],
         )
+        .register("/", catchers![not_found])
+}
+
+#[catch(404)]
+fn not_found() -> (ContentType, Status) {
+    (ContentType::Plain, Status::NotFound)
 }
 
 #[post("/profile", data = "<body>")]
@@ -223,30 +282,13 @@ fn delete_lobby(id: String, shared: &State<Storage>) {
     }
 }
 
-#[post("/jwt/external/<_token>", data = "<_body>")]
-fn silence_jwt_post(_token: String, _body: String) -> (ContentType, &'static str) {
-    (ContentType::Plain, "")
-}
-
-#[post("/jwt/external", data = "<_body>")]
-fn silence_jst_empty_post(_body: Vec<u8>) -> (ContentType, &'static str) {
+#[post("/jwt/external", data = "<body>")]
+fn silence_jst_empty_post(body: Vec<u8>) -> (ContentType, &'static str) {
+    let _ = body;
     (ContentType::Plain, "")
 }
 
 #[post("/telemetry")]
 fn silence_telemetry() -> (ContentType, &'static str) {
     (ContentType::Plain, "")
-}
-
-#[get("/jwt/external/key.pem")]
-fn ok_for_pkey_retrieval() -> (ContentType, &'static str) {
-    (ContentType::Plain, fake::PUB_CERTIFICATE_KEY)
-}
-// The previous implementation used the wrong `ContentType` by mistake.
-//
-// The clients now unfortunately rely on this bug, so: we need to replicate the mistakes.
-// Citra sends: POST /jwt/internal with empty body and x-username/x-token in headers
-#[post("/jwt/internal")]
-fn ok_for_token_retrieval() -> (ContentType, &'static str) {
-    (ContentType::HTML, fake::JWT_TOKEN)
 }
